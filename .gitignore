@@ -1,13 +1,18 @@
-# Python virtual environment
+# Python虚拟环境和缓存
 .venv/
 __pycache__/
 *.pyc
 
-# User data - DO NOT track videos
-videos/
+# PyInstaller打包产物
+build/
+dist/
+*.spec
 
-# Application cache files
+# 缩略图缓存
 .thumb_cache/
 
-# IDE specific settings (e.g., VSCode)
+# IDE配置
 .vscode/
+
+# 视频文件
+videos/
