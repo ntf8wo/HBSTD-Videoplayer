@@ -1,0 +1,13 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# User data - DO NOT track videos
+videos/
+
+# Application cache files
+.thumb_cache/
+
+# IDE specific settings (e.g., VSCode)
+.vscode/
