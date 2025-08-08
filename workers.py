@@ -31,6 +31,21 @@ class ThumbnailWorker(QThread):
                 process = QProcess()
                 process.setProcessChannelMode(QProcess.MergedChannels)
                 
+                # 为Windows 7设置环境变量
+                if sys.platform.startswith('win'):
+                    try:
+                        import platform
+                        version = platform.version()
+                        major, minor, build = map(int, version.split('.'))
+                        # Windows 7 是 6.1 版本
+                        if major == 6 and minor == 1:
+                            # Windows 7 兼容性设置
+                            process_environment = process.processEnvironment()
+                            process_environment.insert("QT_OPENGL", "software")
+                            process.setProcessEnvironment(process_environment)
+                    except Exception as e:
+                        print(f"设置Windows 7兼容性时出错: {e}")
+                
                 command = self.ffmpeg_path
                 args = ['-y', '-ss', '00:00:01', '-i', p, '-vframes', '1', '-q:v', '2', thumbnail_path]
                 

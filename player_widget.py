@@ -27,6 +27,9 @@ class PlayerWidget(QWidget):
     back_to_browser_requested = Signal()
     def __init__(self):
         super().__init__()
+        # Windows 7 兼容性设置
+        self.setup_vlc_for_windows()
+        
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
         
@@ -42,12 +45,29 @@ class PlayerWidget(QWidget):
         self.timer = QTimer(self); self.timer.setInterval(200); self.timer.timeout.connect(self.update_ui)
         self.setFocusPolicy(Qt.StrongFocus)  # 允许获取焦点
     
+    def setup_vlc_for_windows(self):
+        """
+        为Windows系统设置VLC参数以提高兼容性
+        """
+        if sys.platform.startswith('win'):
+            try:
+                import platform
+                version = platform.version()
+                major, minor, build = map(int, version.split('.'))
+                # Windows 7 是 6.1 版本
+                if major == 6 and minor == 1:
+                    # 对于Windows 7，设置VLC使用DirectX而不是OpenGL
+                    os.environ['QT_OPENGL'] = 'software'
+            except Exception as e:
+                print(f"设置VLC Windows 7兼容性时出错: {e}")
+    
     def init_ui(self):
         self.setAttribute(Qt.WA_TranslucentBackground); main_layout=QVBoxLayout(self); main_layout.setContentsMargins(0,0,0,0); main_layout.setSpacing(0)
         self.video_frame=QWidget(); self.video_frame.setStyleSheet("background:transparent;")
         ctrl_bar=QWidget(); ctrl_bar.setStyleSheet("background-color:rgba(0,0,0,0.6);")
         ctrl_layout=QHBoxLayout(ctrl_bar); ctrl_layout.setContentsMargins(10,5,10,5)
         self.back_btn=QPushButton("返回列表"); self.back_btn.clicked.connect(self.request_back)
+        self.play_pause_btn=QPushButton(); self.play_pause_btn.setObjectName("play_pause_btn"); self.play_pause_btn.setIcon(self.play_icon); self.play_pause_btn.setIconSize(QSize(24,24)); self.play_pause_btn.setFixedSize(QSize(40,40)); self.play_pause_btn.clicked.connect(self.toggle_play_pause)
         self.play_pause_btn=QPushButton(); self.play_pause_btn.setObjectName("play_pause_btn"); self.play_pause_btn.setIcon(self.play_icon); self.play_pause_btn.setIconSize(QSize(24,24)); self.play_pause_btn.setFixedSize(QSize(40,40)); self.play_pause_btn.clicked.connect(self.toggle_play_pause)
         self.pos_slider=ClickableSlider(Qt.Horizontal); self.pos_slider.setRange(0,1000); self.pos_slider.sliderMoved.connect(self.set_position)
         self.time_label=QLabel("--:-- / --:--"); self.time_label.setStyleSheet("color:#FFFFFF;background:transparent;")

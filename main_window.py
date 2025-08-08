@@ -22,6 +22,9 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         
+        # 检查Windows版本并进行相应设置
+        self.setup_windows_compatibility()
+        
         # 修正路径：区分开发环境和打包环境
         if getattr(sys, 'frozen', False): # 打包后的环境
             self.ffmpeg_path = os.path.join(base_path, 'ffmpeg.exe')
@@ -47,6 +50,23 @@ class MainWindow(QWidget):
         self.set_background_image(os.path.join(base_path, 'background.jpg'))
         self.showFullScreen()
     
+    def setup_windows_compatibility(self):
+        """
+        设置Windows兼容性选项
+        """
+        if sys.platform.startswith('win'):
+            try:
+                import platform
+                version = platform.version()
+                major, minor, build = map(int, version.split('.'))
+                # Windows 7 是 6.1 版本
+                if major == 6 and minor == 1:
+                    # Windows 7 特定设置
+                    os.environ['QT_OPENGL'] = 'software'
+                    os.environ['QT_DEBUG_PLUGINS'] = '1'
+            except Exception as e:
+                print(f"检查Windows版本时出错: {e}")
+    
     def set_background_image(self, image_path):
         if not os.path.exists(image_path): print(f"警告：背景图片未找到：{image_path}"); return
         palette = self.palette(); image = QImage(image_path)
@@ -59,53 +79,60 @@ class MainWindow(QWidget):
         start_path = os.path.join(os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else base_path, 'videos')
         folder = QFileDialog.getExistingDirectory(self, "请选择存放视频的主文件夹", start_path if os.path.exists(start_path) else os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else base_path)
         if folder: self.root_folder = folder; self.initial_label.hide(); self.tab_widget.show(); self.load_all_content()
-        else: QMessageBox.warning(self, "操作取消", "您没有选择文件夹，程序将退出。"); self.close()
-    def return_to_browser(self): self.stacked_widget.setCurrentWidget(self.browser_widget)
-    def load_all_content(self):
-        if self.thumbnail_worker and self.thumbnail_worker.isRunning(): self.thumbnail_worker.stop(); self.thumbnail_worker.wait()
-        self.tab_widget.clear(); self.video_buttons.clear()
-        try:
-            subfolders = [f.name for f in os.scandir(self.root_folder) if f.is_dir()]
-            if not subfolders: self.show_warning_message("选择的文件夹内没有找到任何子文件夹。"); return
-            all_video_files = []
-            for category_name in sorted(subfolders):
-                category_path = os.path.join(self.root_folder, category_name);scroll_area, grid_layout = self.create_tab_layout();video_files = self.find_videos_in_path(category_path);all_video_files.extend(video_files)
-                if not video_files: grid_layout.addWidget(QLabel("此分类下没有视频文件。"), 0, 0, Qt.AlignCenter)
-                else:
-                    columns = 4
-                    for i, video_path in enumerate(video_files): button = self.create_video_button(video_path); grid_layout.addWidget(button, i // columns, i % columns); self.video_buttons[video_path] = button
-                self.tab_widget.addTab(scroll_area, category_name)
-            if all_video_files: self.start_thumbnail_generation(all_video_files)
-        except Exception as e: self.show_error_message(f"加载内容时发生错误: {e}")
-    def create_tab_layout(self):
-        scroll_area = QScrollArea(); scroll_area.setWidgetResizable(True); scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);scroll_area.setStyleSheet("background: transparent; border: none;");content_widget = QWidget(); content_widget.setStyleSheet("background: transparent;");scroll_area.setWidget(content_widget);grid_layout = QGridLayout(content_widget); grid_layout.setSpacing(30); grid_layout.setContentsMargins(30, 30, 30, 30);return scroll_area, grid_layout
-    def find_videos_in_path(self, path):
-        formats = ('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv');return sorted([os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(formats)])
-    def create_video_button(self, video_path):
-        button = QToolButton(); button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon);button.setIconSize(QSize(250, 140)); button.setFixedSize(QSize(270, 200));button.setText(os.path.splitext(os.path.basename(video_path))[0]); button.setFont(QFont("Microsoft YaHei", 11))
-        button.clicked.connect(lambda: self.play_video(video_path)); return button
-    def start_thumbnail_generation(self, video_files):
-        self.thumbnail_worker = ThumbnailWorker(video_files, self.thumbnail_cache_dir, self.ffmpeg_path)
-        self.thumbnail_worker.thumbnail_ready.connect(self.update_button_icon)
-        self.thumbnail_worker.error_occurred.connect(self.show_error_message)
-        self.thumbnail_worker.start()
-    def update_button_icon(self, video_path, thumb_path):
+    def load_all_content(self): 
+        if self.thumbnail_worker and self.thumbnail_worker.isRunning(): self.thumbnail_worker.request_stop(); self.thumbnail_worker.wait()
+        self.thumbnail_worker = ThumbnailWorker(self.root_folder, self.thumbnail_cache_dir, self.ffmpeg_path)
+        self.thumbnail_worker.thumbnail_ready.connect(self.update_thumbnail); self.thumbnail_worker.finished.connect(self.on_thumbnail_generation_finished)
+        self.thumbnail_worker.start(); self.show_loading_animation()
+    def on_thumbnail_generation_finished(self): self.hide_loading_animation()
+    def show_loading_animation(self):
+        for button in self.video_buttons.values(): button.setIcon(QIcon(QMovie(os.path.join(base_path, "loading.gif"))))
+    def hide_loading_animation(self): 
+        for movie in [button.icon().movie() for button in self.video_buttons.values() if button.icon().movie()]: movie.stop()
+    def update_thumbnail(self, video_path, thumbnail_path):
         if video_path in self.video_buttons:
-            pixmap = QImage(thumb_path)
-            if pixmap.isNull():
-                print(f"错误：无法从路径加载缩略图文件: {thumb_path}")
-                return
-            self.video_buttons[video_path].setIcon(QIcon(thumb_path))
-    def play_video(self, video_path):
-        self.stacked_widget.setCurrentWidget(self.player_widget)
-        self.player_widget.start_playback(video_path)
-        self.player_widget.setFocus()  # 让播放器获取焦点
-    def closeEvent(self, event):
-        if self.thumbnail_worker and self.thumbnail_worker.isRunning(): self.thumbnail_worker.stop(); self.thumbnail_worker.wait()
-        self.player_widget.stop_playback(); event.accept()
-    def show_error_message(self, message): QMessageBox.critical(self, "错误", message)
-    def show_warning_message(self, message): QMessageBox.warning(self, "提醒", message)
-    def apply_stylesheet(self):
-        self.setStyleSheet("""
-            QStackedWidget, QTabWidget::pane { background: transparent; border: none; } QWidget { color: #FFFFFF; font-family: "Microsoft YaHei UI", SimHei, Arial; } QTabBar { font-size: 16px; font-weight: bold; } QTabBar::tab { background: rgba(0, 50, 100, 0.7); border: 1px solid rgba(255, 255, 255, 0.3); border-bottom: none; color: #DDDDDD; padding: 15px; border-top-left-radius: 8px; border-top-right-radius: 8px; } QTabBar::tab:hover { background: rgba(0, 80, 150, 0.8); } QTabBar::tab:selected { background: rgba(20, 120, 220, 0.8); color: #FFFFFF; border-bottom: 2px solid #FFFFFF; } QToolButton { background-color: rgba(0, 0, 0, 0.5); border: 2px solid rgba(255, 255, 255, 0.2); border-radius: 10px; padding: 8px; color: #FFFFFF; } QToolButton:hover { background-color: rgba(20, 120, 220, 0.5); border-color: rgba(255, 255, 255, 0.8); } PlayerWidget QPushButton { background-color: #0078D7; color: white; border: none; padding: 8px 16px; border-radius: 5px; font-size: 14px; } PlayerWidget QPushButton:hover { background-color: #005A9E; } QPushButton#play_pause_btn { background-color: transparent; border: none; padding: 0px; } QSlider::groove:horizontal { border: 1px solid #4A4A4A; background: #666666; height: 6px; border-radius: 3px; } QSlider::handle:horizontal { background: #FFFFFF; border: 1px solid #FFFFFF; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; } QSlider::sub-page:horizontal { background: #0078D7; border: 1px solid #4A4A4A; height: 6px; border-radius: 3px; } QScrollBar:vertical { border: none; background: rgba(0,0,0,0.3); width: 12px; margin: 0px; } QScrollBar::handle:vertical { background: rgba(0, 120, 215, 0.7); min-height: 20px; border-radius: 6px; } QScrollBar::handle:vertical:hover { background: rgba(0, 120, 215, 1.0); } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; } QMessageBox { background-color: #001f3f; }
-        """)
+            pixmap = QImage(thumbnail_path)
+            icon = QIcon(pixmap)
+            self.video_buttons[video_path].setIcon(icon)
+            self.video_buttons[video_path].setIconSize(QSize(320, 180))
+    def play_video(self, video_path): self.player_widget.load_video(video_path); self.stacked_widget.setCurrentWidget(self.player_widget)
+    def return_to_browser(self): self.stacked_widget.setCurrentWidget(self.browser_widget)
+    def load_content(self, folder_path, grid_layout):
+        from functools import partial
+        for i in reversed(range(grid_layout.count())): 
+            widget = grid_layout.itemAt(i).widget()
+            if widget: widget.deleteLater()
+        video_extensions = ('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm')
+        videos = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.lower().endswith(video_extensions)]
+        self.video_buttons = {}
+        for i, video in enumerate(videos):
+            video_path = os.path.join(folder_path, video)
+            button = QToolButton()
+            button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            button.setText(video if len(video) <= 20 else video[:17] + "...")
+            button.setIconSize(QSize(320, 180))
+            button.setFixedSize(340, 220)
+            button.clicked.connect(partial(self.play_video, video_path))
+            self.video_buttons[video_path] = button
+            row, col = divmod(i, 3)
+            grid_layout.addWidget(button, row, col)
+    def apply_stylesheet(self): self.setStyleSheet("""
+QWidget { font-family: "Microsoft YaHei"; background-color: rgba(0, 0, 0, 150); }
+QTabWidget::pane { border: none; background: transparent; }
+QTabBar::tab { 
+    background: rgba(0, 0, 0, 100); color: white; padding: 8px 20px; margin: 2px;
+    border-top-left-radius: 4px; border-top-right-radius: 4px;
+}
+QTabBar::tab:selected { background: rgba(50, 50, 50, 150); font-weight: bold; }
+QTabBar::tab:hover:!selected { background: rgba(30, 30, 30, 150); }
+QLabel { color: white; font-size: 14px; }
+QToolButton { 
+    background-color: rgba(0, 0, 0, 100); border: 2px solid rgba(255, 255, 255, 30);
+    border-radius: 8px; color: white; font-size: 12px; font-weight: bold;
+}
+QToolButton:hover { background-color: rgba(30, 30, 30, 150); border: 2px solid rgba(255, 255, 255, 80); }
+QToolButton:pressed { background-color: rgba(50, 50, 50, 200); }
+QScrollBar:vertical { background: rgba(0, 0, 0, 100); width: 12px; border-radius: 6px; }
+QScrollBar::handle:vertical { background: rgba(255, 255, 255, 100); border-radius: 6px; min-height: 20px; }
+QScrollBar::handle:vertical:hover { background: rgba(255, 255, 255, 150); }
+""")
